@@ -13,6 +13,11 @@ typedef struct status_code {
     std::string name;
 } status_code_t;
 
+typedef struct http_request {
+    std::string path;
+} http_request_t;
+
+
 #define STATUS_OK status_code_t {.code = 200, .name = "OK"}
 #define STATUS_NOT_FOUND status_code_t {.code = 404, .name = "Not Found"}
 #define STATUS_SERVER_ERROR status_code_t {.code = 500, .name = "Internal Server Error"}
@@ -58,9 +63,19 @@ std::string read_file(const std::string& filepath){
     return content;
 }
 
-typedef struct http_request {
-    std::string path;
-} http_request_t;
+std::string get_filename_from_path(std::string path){
+    std::string filename;
+    
+    for(int i=0; i<path.length(); i++){
+        if(i+1 > path.length()-1){
+            if(path[i] == '/'){
+                filename = path+"index";
+            }
+        }
+    }
+
+    return filename;
+}
 
 http_request_t parse_html_request(char* request_buffer){
     std::string request_str = request_buffer;
