@@ -3,6 +3,7 @@
 #include <string>
 #include <winsock2.h>
 #include <filesystem>
+#include <ctime>
 
 #define PORT_NUMBER 8081
 #define PROTOCOL "HTTP/1.1"
@@ -20,7 +21,7 @@ typedef struct http_request {
 
 #define STATUS_OK status_code_t {.code = 200, .name = "OK"}
 #define STATUS_NOT_FOUND status_code_t {.code = 404, .name = "Not Found"}
-#define STATUS_SERVER_ERROR status_code_t {.code = 500, .name = "Internal Server Error"}
+#define STATUS_INTERNAL_SERVER_ERROR status_code_t {.code = 500, .name = "Internal Server Error"}
 
 std::string create_http_response(status_code_t status_code, const std::string& date, int content_length, const std::string& content_type, const std::string& content){
     std::string response;
@@ -37,22 +38,14 @@ std::string create_http_response(status_code_t status_code, const std::string& d
 }
 
 /*
-    Read file from the html folder
-    If this function returns crashes/fails -> 404
+    Read file from the page folder
+    If this function returns crashes/fails -> 500
 */
-std::string read_file(const std::string& filepath){
+std::string read_file(const std::string& filename){
     std::string output;
-    std::string fullpath;
     std::string content;
-    
-    if(filepath == "/") {
-        fullpath = "html/index.html";
-    } else {
-        //should check if path already has .html
-        fullpath = "html"+filepath+".html";
-    }
 
-    std::ifstream file(fullpath);
+    std::ifstream file(filename);
     
     while(std::getline(file, output)){
         content += output;
@@ -63,25 +56,63 @@ std::string read_file(const std::string& filepath){
     return content;
 }
 
+/*
+    Parses the filename from the path string
+    / -> index.html
+    /index -> index.html
+    /page.html -> page.html
+*/
 std::string get_filename_from_path(std::string path){
-    std::string filename;
-    
+    std::string filename = "page";
+
     for(int i=0; i<path.length(); i++){
         if(i+1 > path.length()-1){
+            //last char
             if(path[i] == '/'){
-                filename = path+"index";
+                filename = "/index.html";
+                break;
+            }
+
+            //look for file extension
+            std::string file_extension;
+            bool extension_found = false;
+            for(int j=path.length()-1; j>-1; j--){
+                file_extension += path[j];
+                if(path[j] == '.'){
+                    //file extension found
+                    extension_found = true;
+                    filename = path;
+                    break;
+                }
+            }
+            
+            //no file extension
+            //defaults to .html file
+            if(!extension_found){
+                filename = path+".html";
             }
         }
     }
-
+    
     return filename;
+}
+
+//TODO
+std::string get_current_date(){
+    std::string date;
+    time_t timestamp;
+    time(&timestamp);
+    
+    date = ctime(&timestamp);
+    date.erase(date.length()-1, 2);
+    return date;
 }
 
 http_request_t parse_html_request(char* request_buffer){
     std::string request_str = request_buffer;
     std::string path_temp;
     http_request_t request;
-
+    
     for(int i=0; i<request_str.length(); i++){
         if(request_str[i] == '/'){
             for(int j=i; j<request_str.length(); j++){
@@ -93,9 +124,9 @@ http_request_t parse_html_request(char* request_buffer){
             break;
         }
     }
-
+    
     request.path = path_temp;
-
+    
     return request;
 }
 
@@ -135,22 +166,31 @@ int main(){
         
         //receive data
         recv(client_socket, buffer, sizeof(buffer), 0);
-        std::cout << "Message from client: " << buffer << std::endl;
+        // std::cout << "Message from client: " << buffer << std::endl;
         
         //create request object
         http_request_t request = parse_html_request(buffer);
-        std::cout << "PATH: " << request.path << std::endl;
+        std::cout << "REQUEST PATH: " << request.path << std::endl;
         
-        //TODO work bot with file extension and without it like hello & hello.html 
+        get_current_date();
 
         //tries to find the file for the path
-        if(std::filesystem::exists("html"+request.path+".html")){
-            content = read_file(request.path);       
-            response = create_http_response(STATUS_OK, "Mon, 15 Sep 16:48:40 GMT", content.size(), "text/html", content);
-        } else {
-            //file not found -> 404
-            content = read_file("/notfound");
-            response = create_http_response(STATUS_NOT_FOUND, "Mon, 15 Sep 16:48:40 GMT", content.size(), "text/html", content);
+        std::string filename = get_filename_from_path(request.path);
+        
+        try {
+            if(std::filesystem::exists("page/"+filename)){
+                content = read_file(get_filename_from_path(request.path));       
+                response = create_http_response(STATUS_OK, get_current_date(), content.size(), "text/html", content);
+            } else {
+                //file not found -> 404
+                content = read_file("html/notfound.html");
+                response = create_http_response(STATUS_NOT_FOUND, get_current_date(), content.size(), "text/html", content);
+            }
+        } catch(int error_code){
+            //internal server error -> 500
+            LOG("Error: "+error_code);
+            content = read_file("html/servererror.html");
+            response = create_http_response(STATUS_INTERNAL_SERVER_ERROR, get_current_date(), content.size(), "text/html", content);
         }
 
         send(client_socket, response.c_str(), response.size(), 0);
