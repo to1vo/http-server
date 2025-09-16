@@ -7,6 +7,7 @@
 
 #define PORT_NUMBER 8081
 #define PROTOCOL "HTTP/1.1"
+#define DOCUMENT_ROOT "www"
 #define LOG(x) std::cout << x << std::endl;
 
 typedef struct status_code {
@@ -38,8 +39,8 @@ std::string create_http_response(status_code_t status_code, const std::string& d
 }
 
 /*
-    Read file from the page folder
-    If this function returns crashes/fails -> 500
+    Read file from the document root folder
+    If this function would crash/fail -> server error 500
 */
 std::string read_file(const std::string& filename){
     std::string output;
@@ -57,19 +58,21 @@ std::string read_file(const std::string& filename){
 }
 
 /*
-    Parses the filename from the path string
+    Parses the filename from the request path string
+    With this system ../ or C:/ -> 404 not found 
     / -> index.html
     /index -> index.html
     /page.html -> page.html
+    /main.js -> main.js etc
 */
 std::string get_filename_from_path(std::string path){
-    std::string filename = "page";
+    std::string filename = DOCUMENT_ROOT;
 
     for(int i=0; i<path.length(); i++){
         if(i+1 > path.length()-1){
             //last char
             if(path[i] == '/'){
-                filename = "/index.html";
+                filename += path+"index.html";
                 break;
             }
 
@@ -81,7 +84,7 @@ std::string get_filename_from_path(std::string path){
                 if(path[j] == '.'){
                     //file extension found
                     extension_found = true;
-                    filename = path;
+                    filename += path;
                     break;
                 }
             }
@@ -89,7 +92,7 @@ std::string get_filename_from_path(std::string path){
             //no file extension
             //defaults to .html file
             if(!extension_found){
-                filename = path+".html";
+                filename += path+".html";
             }
         }
     }
@@ -97,7 +100,6 @@ std::string get_filename_from_path(std::string path){
     return filename;
 }
 
-//TODO
 std::string get_current_date(){
     std::string date;
     time_t timestamp;
@@ -106,6 +108,16 @@ std::string get_current_date(){
     date = ctime(&timestamp);
     date.erase(date.length()-1, 2);
     return date;
+}
+
+//Checks if the document root filepath exists
+bool file_exists(const std::string& filepath){
+    std::cout << filepath << std::endl;
+    if(std::filesystem::exists(filepath)){
+        return true;
+    }
+    
+    return false;
 }
 
 http_request_t parse_html_request(char* request_buffer){
@@ -170,15 +182,12 @@ int main(){
         
         //create request object
         http_request_t request = parse_html_request(buffer);
-        std::cout << "REQUEST PATH: " << request.path << std::endl;
-        
-        get_current_date();
+        std::cout << "REQUEST TO PATH: " << request.path << std::endl;
 
-        //tries to find the file for the path
         std::string filename = get_filename_from_path(request.path);
-        
+
         try {
-            if(std::filesystem::exists("page/"+filename)){
+            if(file_exists(filename)){
                 content = read_file(get_filename_from_path(request.path));       
                 response = create_http_response(STATUS_OK, get_current_date(), content.size(), "text/html", content);
             } else {
