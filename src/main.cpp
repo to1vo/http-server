@@ -40,14 +40,40 @@ std::string create_http_response(status_code_t status_code, const std::string& d
 
 /*
     Read file from the document root folder
-    If this function would crash/fail -> server error 500
+    If this function would crash/fail/throw -> server error 500
 */
-std::string read_file(const std::string& filename){
+std::string read_file(const std::string& filename, const std::string& file_extension){
     std::string output;
     std::string content;
 
-    std::ifstream file(filename);
     
+    /*
+        Read binary file, this includes things like images
+    */
+    if(file_extension == ".png"){
+        std::ifstream file(filename, std::ios::binary | std::ios::ate);
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        
+        if(size == 0){
+            throw std::runtime_error("File is empty or cannot read it");
+        }
+
+        std::string content(size, '\0');
+        if(!file.read(&content[0], size)){
+            throw std::runtime_error("Failed to read file " + filename);
+        }        
+
+        std::cout << "Succesfully read " << size << " bytes into string" << std::endl;
+
+        file.close();
+
+        return content;
+    }
+
+    //Reading normal text file
+    std::ifstream file(filename);
+
     while(std::getline(file, output)){
         content += output;
     }
@@ -112,7 +138,6 @@ std::string get_current_date(){
 
 //Checks if the document root filepath exists
 bool file_exists(const std::string& filepath){
-    std::cout << filepath << std::endl;
     if(std::filesystem::exists(filepath)){
         return true;
     }
@@ -140,6 +165,44 @@ http_request_t parse_html_request(char* request_buffer){
     request.path = path_temp;
     
     return request;
+}
+
+//Expects that the file has actually a extension
+std::string get_file_extension(const std::string& filename){
+    std::size_t starting_index = filename.rfind('.');
+    std::string file_extension;
+    
+    for(int i=starting_index; i<filename.length(); i++){
+        file_extension += filename[i];    
+    }
+
+    return file_extension;
+}
+
+/*
+    Idea of this is to tell the content type
+    by the files extension
+*/
+std::string get_content_type(const std::string& file_extension){
+    std::string content_type;
+    
+    if(file_extension == ".html"){
+        content_type = "text/html";
+    } else  
+    if(file_extension == ".css"){
+        content_type = "text/css";
+    } else 
+    if(file_extension == ".js"){
+        content_type = "text/javascript";
+    } else 
+    if(file_extension == ".json"){
+        content_type = "application/json";
+    } else
+    if(file_extension == ".png"){
+        content_type = "image/png";
+    }
+
+    return content_type;
 }
 
 int main(){
@@ -188,17 +251,18 @@ int main(){
 
         try {
             if(file_exists(filename)){
-                content = read_file(get_filename_from_path(request.path));       
-                response = create_http_response(STATUS_OK, get_current_date(), content.size(), "text/html", content);
+                std::string file_extension = get_file_extension(filename);
+                content = read_file(filename, file_extension);       
+                response = create_http_response(STATUS_OK, get_current_date(), content.size(), get_content_type(file_extension), content);
             } else {
                 //file not found -> 404
-                content = read_file("html/notfound.html");
+                content = read_file("html/notfound.html", ".html");
                 response = create_http_response(STATUS_NOT_FOUND, get_current_date(), content.size(), "text/html", content);
             }
-        } catch(int error_code){
+        } catch(const std::exception& error){
             //internal server error -> 500
-            LOG("Error: "+error_code);
-            content = read_file("html/servererror.html");
+            // LOG(error);
+            content = read_file("html/servererror.html", ".html");
             response = create_http_response(STATUS_INTERNAL_SERVER_ERROR, get_current_date(), content.size(), "text/html", content);
         }
 
