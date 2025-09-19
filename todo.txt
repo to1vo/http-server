@@ -1,0 +1,20 @@
+Add Common image file support
+
+Check that js works
+
+Full url path support things like ? and &
+
+Auto refresh
+    -JavaScript code is injected to every html file
+        -this code opens a websocket connection with the server
+    -Server checks for file changes
+        -when it sees a file change it gives a message through the websocket
+        -this messsage contains what the file change is html, css or js
+        -or if its new a new file
+    -JavaScript code then receives the websocket message and checks the file type
+        -if it is html or js it makes window.reload() witch refreshes the page, in case of css it replaces the <link> with a timestamp
+        -or in the case of new file just window.reload()
+
+Organize the file structure + Makefile
+
+UI with imgui
