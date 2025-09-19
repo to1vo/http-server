@@ -20,3 +20,5 @@
 - UI (probably with imgui or Win32 API)
 - Project structure organization
 - Refactoring
+
+Toivo Lindholm 2025
