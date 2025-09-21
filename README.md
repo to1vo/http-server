@@ -16,7 +16,7 @@
 - Auto refresh JS injection
 - Websocket server for auto refresh
 - Support for common image types
-- Support for parameters/anchors
+- Support for parameters
 - UI (probably with imgui or Win32 API)
 - Project structure organization
 - Refactoring
