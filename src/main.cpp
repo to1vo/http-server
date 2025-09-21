@@ -8,7 +8,7 @@
 #include <assert.h>
 #include <thread>
 #include <nlohmann/json.hpp> 
-#include <set>
+#include <map>
 
 #define PORT_NUMBER 8081
 #define PROTOCOL "HTTP/1.1"
@@ -22,6 +22,8 @@ typedef struct status_code {
 
 typedef struct http_request {
     std::string path;
+    std::map<std::string, std::string> parameters;
+    std::string anchor;
 } http_request_t;
 
 
@@ -51,7 +53,6 @@ std::string read_file(const std::string& filename, const std::string& file_exten
     std::string output;
     std::string content;
 
-    
     /*
         Read binary file, this includes things like images
     */
@@ -330,9 +331,9 @@ void check_for_file_changes(){
 }
 
 /*
-    Handle the file modification 
+    Handle the file modification object
     create the json message that will be sent through the websocket server
-    pass that to the websocket send function
+    and pass that to websocket send function
 */
 void handle_file_modification(file_modification_t& file_modification){
     //making sure that filename contains only ASCII characters
@@ -353,6 +354,7 @@ void handle_file_modification(file_modification_t& file_modification){
     websocket_send(json);
 }
 
+//sends message to websocket client
 void websocket_send(nlohmann::json json){
 
 }
@@ -360,6 +362,8 @@ void websocket_send(nlohmann::json json){
 int main(){
     //thread for handling the file changes
     std::thread thread2(check_for_file_changes);
+    //this will be used for websocket server
+    // std::thread thread3();
 
     WSADATA wsa_data;
     if(WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0){
