@@ -7,6 +7,7 @@
 - Basic file serving from www folder
 - Automatic index.html on root /
 - Tries to find html file for /page
+- Supports url parameters
 - Images (atm only .png)
 - 200, 404 and 500 status
 - Checking for file/folder modifications inside the www folder

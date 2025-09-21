@@ -8,7 +8,8 @@
 #include <assert.h>
 #include <thread>
 #include <nlohmann/json.hpp> 
-#include <map>
+#include <mutex>
+#include <queue>
 
 #define PORT_NUMBER 8081
 #define PROTOCOL "HTTP/1.1"
@@ -22,8 +23,6 @@ typedef struct status_code {
 
 typedef struct http_request {
     std::string path;
-    std::map<std::string, std::string> parameters;
-    std::string anchor;
 } http_request_t;
 
 
@@ -158,8 +157,13 @@ http_request_t parse_html_request(char* request_buffer){
     
     for(int i=0; i<request_str.length(); i++){
         if(request_str[i] == '/'){
+            //start of path
             for(int j=i; j<request_str.length(); j++){
-                if(request_str[j] == ' '){
+                // if(request_str[j] == '?'){
+                //     //handle the params
+                //     break;
+                // }
+                if(request_str[j] == ' ' || request_str[j] == '?'){
                     break;
                 }
                 path_temp += request_str[j];
@@ -216,118 +220,12 @@ typedef struct file_modification {
     std::string action;
 } file_modification_t;
 
-void check_for_file_changes(){
-    const char* website_path = DOCUMENT_ROOT;
-    
-    std::cout << "Checking for file changes in " << website_path << std::endl;
+std::mutex websocket_queue_mutex;
+std::queue<file_modification_t> websocket_event_queue;
 
-    //Create handler to the folder
-    HANDLE file = CreateFile(
-        website_path, 
-        FILE_LIST_DIRECTORY, 
-        FILE_SHARE_READ | 
-        FILE_SHARE_WRITE | 
-        FILE_SHARE_DELETE, 
-        NULL, 
-        OPEN_EXISTING, 
-        FILE_FLAG_BACKUP_SEMANTICS | 
-        FILE_FLAG_OVERLAPPED, 
-        NULL
-    );
-    
-    assert(file != INVALID_HANDLE_VALUE);
-    OVERLAPPED overlapped;
-    overlapped.hEvent = CreateEvent(NULL, FALSE, 0, NULL);
-    
-    //Create a buffer to save the changes
-    uint8_t change_buffer[1024];
+//sends message to websocket client
+void websocket_send(nlohmann::json json){
 
-    BOOL success = ReadDirectoryChangesW(
-        file, 
-        change_buffer, 
-        sizeof(change_buffer), 
-        TRUE, 
-        FILE_NOTIFY_CHANGE_FILE_NAME | 
-        FILE_NOTIFY_CHANGE_DIR_NAME | 
-        FILE_NOTIFY_CHANGE_LAST_WRITE, 
-        NULL, &overlapped, NULL
-    );
-
-    while(true){
-        DWORD result = WaitForSingleObject(overlapped.hEvent, 0);
-        
-        if(result == WAIT_OBJECT_0){
-            DWORD bytes_transferred;
-            GetOverlappedResult(file, &overlapped, &bytes_transferred, FALSE);
-
-            //store the event
-            FILE_NOTIFY_INFORMATION *event = (FILE_NOTIFY_INFORMATION*)change_buffer;
-
-            // while(true){
-            DWORD name_len = event->FileNameLength / sizeof(wchar_t);
-            
-            //read to whole filename
-            std::string filename;
-            for(int i=0; i<(int)wcslen(event->FileName); i++){
-                filename += event->FileName[i];
-            }
-            
-            std::cout << "Filename: " << filename << std::endl;
-            
-            std::string action;
-            switch(event->Action){
-                case FILE_ACTION_ADDED:
-                    std::cout << "File added" << std::endl;
-                    action = "added"; 
-                break;
-                case FILE_ACTION_REMOVED:
-                    std::cout << "File removed" << std::endl;
-                    action = "removed";
-                    break;
-                case FILE_ACTION_MODIFIED:
-                    std::cout << "File modified" << std::endl;
-                    action = "modified";
-                    break;
-                case FILE_ACTION_RENAMED_NEW_NAME:
-                    std::cout << "File Renamed" << std::endl;
-                    action = "renamed";
-                    break;
-                default:
-                    std::cout << "Unknown action" << std::endl;
-                    action = "";
-                    break;
-            }
-            
-            //there was no undefined action
-            if(!action.empty()){
-                //create filechange object
-                file_modification_t file_modification {
-                    .filename = filename,
-                    .action = action
-                };
-                handle_file_modification(file_modification);
-            }
-            
-            //more events to handle?
-            if(event->NextEntryOffset){
-                *((uint8_t**)&event) += event->NextEntryOffset;
-            } else {
-                break;
-            }
-        }
-        
-        //queue the next event
-        BOOL success = ReadDirectoryChangesW(
-            file, 
-            change_buffer, 
-            sizeof(change_buffer), 
-            TRUE, 
-            FILE_NOTIFY_CHANGE_FILE_NAME | 
-            FILE_NOTIFY_CHANGE_DIR_NAME | 
-            FILE_NOTIFY_CHANGE_LAST_WRITE, 
-            NULL, &overlapped, NULL
-        );      
-    }
 }
 
 /*
@@ -354,14 +252,125 @@ void handle_file_modification(file_modification_t& file_modification){
     websocket_send(json);
 }
 
-//sends message to websocket client
-void websocket_send(nlohmann::json json){
+void check_for_file_changes(){
+    const char* website_path = DOCUMENT_ROOT;
+    
+    std::cout << "Checking for file changes in " << website_path << "/" << std::endl;
 
+    //Create handler to the folder
+    HANDLE file = CreateFile(
+        website_path, 
+        FILE_LIST_DIRECTORY, 
+        FILE_SHARE_READ | 
+        FILE_SHARE_WRITE | 
+        FILE_SHARE_DELETE, 
+        NULL, 
+        OPEN_EXISTING, 
+        FILE_FLAG_BACKUP_SEMANTICS | 
+        FILE_FLAG_OVERLAPPED, 
+        NULL
+    );
+    
+    assert(file != INVALID_HANDLE_VALUE);
+    OVERLAPPED overlapped;
+    overlapped.hEvent = CreateEvent(NULL, FALSE, 0, NULL);
+    
+    //Create a buffer to save the changes
+    alignas(DWORD) uint8_t change_buffer[1024];
+
+    BOOL success = ReadDirectoryChangesW(
+        file, 
+        change_buffer, 
+        sizeof(change_buffer), 
+        TRUE, 
+        FILE_NOTIFY_CHANGE_FILE_NAME | 
+        FILE_NOTIFY_CHANGE_DIR_NAME | 
+        FILE_NOTIFY_CHANGE_LAST_WRITE, 
+        NULL, &overlapped, NULL
+    );
+
+    while(true){
+        DWORD result = WaitForSingleObject(overlapped.hEvent, 0);
+        
+        if(result == WAIT_OBJECT_0){
+            std::cout << "FILE CHANGE HAPPENED" << std::endl;
+            DWORD bytes_transferred;
+            GetOverlappedResult(file, &overlapped, &bytes_transferred, FALSE);
+
+            //store the event
+            FILE_NOTIFY_INFORMATION *event = (FILE_NOTIFY_INFORMATION*)change_buffer;
+
+            while(true){
+                DWORD name_len = event->FileNameLength / sizeof(wchar_t);
+            
+                //read to whole filename
+                std::string filename;
+                for(int i=0; i<(int)wcslen(event->FileName); i++){
+                    filename += event->FileName[i];
+                }
+            
+                std::cout << "Filename: " << filename << std::endl;
+            
+                std::string action;
+                switch(event->Action){
+                    case FILE_ACTION_ADDED:
+                        std::cout << "File added" << std::endl;
+                        action = "added"; 
+                        break;
+                    case FILE_ACTION_REMOVED:
+                        std::cout << "File removed" << std::endl;
+                        action = "removed";
+                        break;
+                    case FILE_ACTION_MODIFIED:
+                        std::cout << "File modified" << std::endl;
+                        action = "modified";
+                        break;
+                    case FILE_ACTION_RENAMED_NEW_NAME:
+                        std::cout << "File Renamed" << std::endl;
+                        action = "renamed";
+                        break;
+                    default:
+                        std::cout << "Unknown action" << std::endl;
+                        action = "";
+                        break;
+            }
+            
+            //there was no undefined action
+            if(!action.empty()){
+                //create filechange object
+                file_modification_t file_modification {
+                    .filename = filename,
+                    .action = action
+                };
+                //call thread 3 for file modification
+            }
+            
+            //more events to handle?
+            if(event->NextEntryOffset){
+                *((uint8_t**)&event) += event->NextEntryOffset;
+            } else {
+                break;
+            }
+            }
+        }
+        
+        //queue the next event
+        BOOL success = ReadDirectoryChangesW(
+            file, 
+            change_buffer, 
+            sizeof(change_buffer), 
+            TRUE, 
+            FILE_NOTIFY_CHANGE_FILE_NAME | 
+            FILE_NOTIFY_CHANGE_DIR_NAME | 
+            FILE_NOTIFY_CHANGE_LAST_WRITE, 
+            NULL, &overlapped, NULL
+        );      
+    }
 }
 
 int main(){
     //thread for handling the file changes
-    std::thread thread2(check_for_file_changes);
+    // std::thread thread2(check_for_file_changes);
     //this will be used for websocket server
     // std::thread thread3();
 
