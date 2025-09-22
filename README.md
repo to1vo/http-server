@@ -8,7 +8,7 @@
 - Automatic index.html on root /
 - Tries to find html file for /page
 - Supports url parameters
-- Images (atm only .png)
+- Multiple file formats
 - 200, 404 and 500 status
 - Checking for file/folder modifications inside the www folder
 - Prevented path traversal etc.
@@ -16,7 +16,6 @@
 ## Updates:
 - Auto refresh JS injection
 - Websocket server for auto refresh
-- Support for common image types
 - UI (probably with imgui or Win32 API)
 - Project structure organization
 - Refactoring

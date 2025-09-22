@@ -58,9 +58,9 @@ std::string read_file(const std::string& filename, const std::string& file_exten
     std::string content;
 
     /*
-        Read binary file, this includes things like images
+        Read binary files
     */
-    if(file_extension == ".png"){
+    if(file_extension == ".png" || file_extension == ".jpeg" || file_extension == ".jpg" || file_extension == ".mp3" || file_extension == ".mp4" || file_extension == ".webp"){
         std::ifstream file(filename, std::ios::binary | std::ios::ate);
         std::streamsize size = file.tellg();
         file.seekg(0, std::ios::beg);
@@ -100,6 +100,7 @@ std::string read_file(const std::string& filename, const std::string& file_exten
     /index -> index.html
     /page.html -> page.html
     /main.js -> main.js etc
+    returned value will have document root inserted in front
 */
 std::string get_filename_from_path(std::string path){
     std::string filename = DOCUMENT_ROOT;
@@ -182,26 +183,40 @@ http_request_t parse_html_request(char* request_buffer){
     return request;
 }
 
-//Expects that the file has actually a extension
+/*
+    Expects that the file actually has a extension
+    Returns the extension in lowercase
+*/
 std::string get_file_extension(const std::string& filename){
     std::size_t starting_index = filename.rfind('.');
     std::string file_extension;
     
     for(int i=starting_index; i<filename.length(); i++){
-        file_extension += filename[i];    
+        file_extension += std::tolower(filename[i]);    
     }
 
     return file_extension;
 }
 
+//converts string to lowercase
+std::string convert_string_to_lowercase(const std::string& str){
+    std::string lowercased;
+
+    for(int i=0; i<str.length(); i++){
+        lowercased += std::tolower(str[i]);
+    }
+    
+    return lowercased;
+}
+
 /*
     Idea of this is to tell the content type
-    by the files extension
+    by the requested file's extension
 */
 std::string get_content_type(const std::string& file_extension){
     std::string content_type;
     
-    if(file_extension == ".html"){
+    if(file_extension == ".html" || file_extension == ".htm"){
         content_type = "text/html";
     } else  
     if(file_extension == ".css"){
@@ -215,6 +230,27 @@ std::string get_content_type(const std::string& file_extension){
     } else
     if(file_extension == ".png"){
         content_type = "image/png";
+    }
+    if(file_extension == ".jpeg" || file_extension == ".jpg"){
+        content_type = "image/jpeg"; 
+    } else
+    if(file_extension == ".gif"){
+        content_type = "image/gif";
+    } else 
+    if(file_extension == ".php"){
+        content_type = "application/x-httpd-php";
+    } else
+    if(file_extension == ".svg"){
+        content_type = "image/svg+xml";
+    } else 
+    if(file_extension == ".webp"){
+        content_type = "image/webp";
+    } else 
+    if(file_extension == ".mp3"){
+        content_type = "audio/mpeg";
+    } else 
+    if(file_extension == ".mp4"){
+        content_type = "video/mp4";
     }
 
     return content_type;
@@ -420,7 +456,8 @@ int main(){
         //create request object
         http_request_t request = parse_html_request(buffer);
         std::cout << "REQUEST TO PATH: " << request.path << std::endl;
-
+        
+        //This includes the document root path
         filename = get_filename_from_path(request.path);
         
         try {
