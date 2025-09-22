@@ -16,25 +16,30 @@
 #define DOCUMENT_ROOT "www"
 #define LOG(x) std::cout << x << std::endl;
 
-typedef struct status_code {
-    int code;
-    std::string name;
-} status_code_t;
+typedef enum HttpStatusCode {
+    HTTP_OK = 200,
+    HTTP_NOT_FOUND = 404,
+    HTTP_INTERNAL_SERVER_ERROR = 500
+} http_status_code_t;
 
 typedef struct http_request {
     std::string path;
 } http_request_t;
 
+std::string get_http_status_message(http_status_code_t code){
+    switch(code){
+        HTTP_OK: return "OK";
+        HTTP_OK: return "Not Found";        
+        HTTP_OK: return "Internal Server Error";        
+        default: return "Unknown Status Code";
+    }
+}
 
-#define STATUS_OK status_code_t {.code = 200, .name = "OK"}
-#define STATUS_NOT_FOUND status_code_t {.code = 404, .name = "Not Found"}
-#define STATUS_INTERNAL_SERVER_ERROR status_code_t {.code = 500, .name = "Internal Server Error"}
-
-std::string create_http_response(status_code_t status_code, const std::string& date, int content_length, const std::string& content_type, const std::string& content){
+std::string create_http_response(std::string status_message, http_status_code_t status_code, const std::string& date, int content_length, const std::string& content_type, const std::string& content){
     std::string response;
     
     response += PROTOCOL;
-    response += " "+std::to_string(status_code.code)+" "+status_code.name+"\r\n";
+    response += " "+std::to_string(status_code)+" "+status_message+"\r\n";
     response += "Server: LizardZ\r\n";
     response += "Date: "+date+"\r\n";
     response += "Content-Length: "+std::to_string(content_length)+"\r\n";
@@ -400,6 +405,7 @@ int main(){
 
     std::string response;
     std::string content;
+    std::string filename;
     
     while(true){    
         //the socket that accepts requests
@@ -415,23 +421,24 @@ int main(){
         http_request_t request = parse_html_request(buffer);
         std::cout << "REQUEST TO PATH: " << request.path << std::endl;
 
-        std::string filename = get_filename_from_path(request.path);
-
+        filename = get_filename_from_path(request.path);
+        
         try {
             if(file_exists(filename)){
+                //200 OK
                 std::string file_extension = get_file_extension(filename);
                 content = read_file(filename, file_extension);       
-                response = create_http_response(STATUS_OK, get_current_date(), content.size(), get_content_type(file_extension), content);
+                response = create_http_response(get_http_status_message(HTTP_OK), HTTP_OK, get_current_date(), content.size(), get_content_type(file_extension), content);
             } else {
-                //file not found -> 404
+                //404 Not Found
                 content = read_file("html/notfound.html", ".html");
-                response = create_http_response(STATUS_NOT_FOUND, get_current_date(), content.size(), "text/html", content);
+                response = create_http_response(get_http_status_message(HTTP_NOT_FOUND),HTTP_NOT_FOUND, get_current_date(), content.size(), "text/html", content);
             }
         } catch(const std::exception& error){
-            //internal server error -> 500
-            // LOG(error);
+            //500 Internal Server Error
+            LOG("Error occured...");
             content = read_file("html/servererror.html", ".html");
-            response = create_http_response(STATUS_INTERNAL_SERVER_ERROR, get_current_date(), content.size(), "text/html", content);
+            response = create_http_response(get_http_status_message(HTTP_INTERNAL_SERVER_ERROR), HTTP_INTERNAL_SERVER_ERROR, get_current_date(), content.size(), "text/html", content);
         }
 
         send(client_socket, response.c_str(), response.size(), 0);
