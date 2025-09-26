@@ -103,23 +103,21 @@ std::string create_http_response(std::string status_message, http_status_code_t 
 void inject_js(std::string& html_content){
     std::string js_string = "<script>console.log(\"hello from js injection\")</script>";
 
-    //find a opening tag <
-    //goal is to find the body and inject script into it
+    //goal is to find the body and inject script tag after that
     for(int i=0; i<html_content.length(); i++){
         if(html_content[i] == '<'){
             std::string tag = "";
             u_int insert_pos;
-            //try to find body
+            //check for body tag
             for(int j=i+1; j<i+5; j++){
                 tag += html_content[j];
                 insert_pos = j+2;
             }
-            std::cout << tag << std::endl;
-            std::cout << html_content[insert_pos] << std::endl;
+
             if(tag == "body"){
                 html_content.insert(insert_pos, js_string);
                 std::cout << "Succesfully injected js to html file" << std::endl;
-                std::cout << "Js injected version: " << html_content << std::endl;
+                // std::cout << "Js injected version: " << html_content << std::endl;
                 return;
             }
         }
