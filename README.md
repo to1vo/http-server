@@ -9,6 +9,7 @@
 - Tries to find html file for /page
 - Supports url parameters
 - Multiple file formats
+    - html, htm, css, js, json webp, png, jpg, mp3, mp4, gif, php, svg 
 - 200, 404 and 500 status
 - Checking for file/folder modifications inside the www folder
 - Prevented path traversal etc.

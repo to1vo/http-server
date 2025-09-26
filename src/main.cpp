@@ -1,3 +1,7 @@
+/*
+    HTTP 1.1 Server (LizardZ)
+    Toivo Lindholm 2025
+*/
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -10,11 +14,53 @@
 #include <nlohmann/json.hpp> 
 #include <mutex>
 #include <queue>
+#include <ixwebsocket/IXWebSocketServer.h>
+#include <ixwebsocket/IXNetSystem.h>
 
 #define PORT_NUMBER 8081
+#define WEBSOCKET_PORT_NUMBER 9001
 #define PROTOCOL "HTTP/1.1"
 #define DOCUMENT_ROOT "www"
 #define LOG(x) std::cout << x << std::endl;
+
+// std::mutex websocket_queue_mutex;
+// std::queue<file_modification_t> websocket_event_queue;
+/*
+    Websocket stuff
+*/
+// void start_websocket_server(){
+//     ix::initNetSystem();
+
+//     ix::WebSocketServer server(WEBSOCKET_PORT_NUMBER);
+//     server.setOnConnectionCallback(
+//         [&server](std::weak_ptr<ix::WebSocket> websocket, std::shared_ptr<ix::ConnectionState> connection_state){
+//             std::cout << "New connection from " << connection_state->getRemoteIp() << std::endl;
+
+//             //Convert the weak pointer to shared_ptr so we can access the object
+//             std::shared_ptr<ix::WebSocket> websocket_ptr = (std::shared_ptr<ix::WebSocket>)websocket;
+//             ((std::shared_ptr<ix::WebSocket>)websocket)->setOnMessageCallback([websocket_ptr](const ix::WebSocketMessagePtr& msg){
+//                     if (msg->type == ix::WebSocketMessageType::Message){
+//                         std::cout << "Received: " << msg->str << std::endl;
+//                         websocket_ptr->send("Echo: " + msg->str);
+//                     } else if (msg->type == ix::WebSocketMessageType::Open){
+//                         std::cout << "Connection opened" << std::endl;
+//                     } else if (msg->type == ix::WebSocketMessageType::Close){
+//                         std::cout << "Connection closed" << std::endl;
+//                     }
+//                 });
+//         });
+
+//     auto res = server.listen();
+//     if (!res.first){
+//         std::cerr << "Error starting websocket server: " << res.second << std::endl;
+//     }
+
+//     server.start();
+
+//     std::cout << "Websocket server started on port " << WEBSOCKET_PORT_NUMBER << std::endl;
+
+//     server.wait();
+// }
 
 typedef enum HttpStatusCode {
     HTTP_OK = 200,
@@ -29,12 +75,13 @@ typedef struct http_request {
 std::string get_http_status_message(http_status_code_t code){
     switch(code){
         HTTP_OK: return "OK";
-        HTTP_OK: return "Not Found";        
-        HTTP_OK: return "Internal Server Error";        
+        HTTP_NOT_FOUND: return "Not Found";        
+        HTTP_INTERNAL_SERVER_ERROR: return "Internal Server Error";        
         default: return "Unknown Status Code";
     }
 }
 
+//creates a valid http response as a string
 std::string create_http_response(std::string status_message, http_status_code_t status_code, const std::string& date, int content_length, const std::string& content_type, const std::string& content){
     std::string response;
     
@@ -47,6 +94,38 @@ std::string create_http_response(std::string status_message, http_status_code_t 
     response += content;
 
     return response;
+}
+
+/*
+    This function takes a html file as a string
+    and injects the js that is needed for auto refresh functionality
+*/
+void inject_js(std::string& html_content){
+    std::string js_string = "<script>console.log(\"hello from js injection\")</script>";
+
+    //find a opening tag <
+    //goal is to find the body and inject script into it
+    for(int i=0; i<html_content.length(); i++){
+        if(html_content[i] == '<'){
+            std::string tag = "";
+            u_int insert_pos;
+            //try to find body
+            for(int j=i+1; j<i+5; j++){
+                tag += html_content[j];
+                insert_pos = j+2;
+            }
+            std::cout << tag << std::endl;
+            std::cout << html_content[insert_pos] << std::endl;
+            if(tag == "body"){
+                html_content.insert(insert_pos, js_string);
+                std::cout << "Succesfully injected js to html file" << std::endl;
+                std::cout << "Js injected version: " << html_content << std::endl;
+                return;
+            }
+        }
+    }
+
+    std::cout << "Failed to inject js in to the html file" << std::endl;
 }
 
 /*
@@ -86,6 +165,11 @@ std::string read_file(const std::string& filename, const std::string& file_exten
 
     while(std::getline(file, output)){
         content += output;
+    }
+
+    //inject the auto refresh js to html files
+    if(file_extension == ".html" || file_extension == ".htm"){
+        inject_js(content);
     }
 
     file.close();
@@ -261,14 +345,6 @@ typedef struct file_modification {
     std::string action;
 } file_modification_t;
 
-std::mutex websocket_queue_mutex;
-std::queue<file_modification_t> websocket_event_queue;
-
-//sends message to websocket client
-void websocket_send(nlohmann::json json){
-
-}
-
 /*
     Handle the file modification object
     create the json message that will be sent through the websocket server
@@ -289,8 +365,11 @@ void handle_file_modification(file_modification_t& file_modification){
     json["filename"] = file_modification.filename;
     json["action"] = file_modification.action;
 
-    //websocket send function
-    websocket_send(json);
+    //NOTE: here call the websocket to broadcast a message
+}
+
+void search_for_html_tag(const std::string& tag_name){
+
 }
 
 void check_for_file_changes(){
@@ -413,7 +492,7 @@ int main(){
     //thread for handling the file changes
     // std::thread thread2(check_for_file_changes);
     //this will be used for websocket server
-    // std::thread thread3();
+    // std::thread thread3(start_websocket_server);
 
     WSADATA wsa_data;
     if(WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0){
@@ -438,10 +517,6 @@ int main(){
     //listen to incoming connections
     listen(server_socket, 5);
     std::cout << "Server listening to port " << PORT_NUMBER << std::endl; 
-
-    std::string response;
-    std::string content;
-    std::string filename;
     
     while(true){    
         //the socket that accepts requests
@@ -457,25 +532,51 @@ int main(){
         http_request_t request = parse_html_request(buffer);
         std::cout << "REQUEST TO PATH: " << request.path << std::endl;
         
-        //This includes the document root path
-        filename = get_filename_from_path(request.path);
+        //this will include the document root
+        std::string filename = get_filename_from_path(request.path);
+        std::string response;
         
         try {
+            //check if the file actually exists in the document root folder
             if(file_exists(filename)){
                 //200 OK
                 std::string file_extension = get_file_extension(filename);
-                content = read_file(filename, file_extension);       
-                response = create_http_response(get_http_status_message(HTTP_OK), HTTP_OK, get_current_date(), content.size(), get_content_type(file_extension), content);
+                std::string content = read_file(filename, file_extension);       
+                
+                response = create_http_response(
+                    get_http_status_message(HTTP_OK), 
+                    HTTP_OK, 
+                    get_current_date(), 
+                    content.size(), 
+                    get_content_type(file_extension), 
+                    content
+                );
             } else {
                 //404 Not Found
-                content = read_file("html/notfound.html", ".html");
-                response = create_http_response(get_http_status_message(HTTP_NOT_FOUND),HTTP_NOT_FOUND, get_current_date(), content.size(), "text/html", content);
+                std::string content = read_file("html/notfound.html", ".html");
+
+                response = create_http_response(
+                    get_http_status_message(HTTP_NOT_FOUND),
+                    HTTP_NOT_FOUND, 
+                    get_current_date(), 
+                    content.size(), 
+                    "text/html", 
+                    content
+                );
             }
         } catch(const std::exception& error){
             //500 Internal Server Error
             LOG("Error occured...");
-            content = read_file("html/servererror.html", ".html");
-            response = create_http_response(get_http_status_message(HTTP_INTERNAL_SERVER_ERROR), HTTP_INTERNAL_SERVER_ERROR, get_current_date(), content.size(), "text/html", content);
+
+            std::string content = read_file("html/servererror.html", ".html");
+
+            response = create_http_response(
+                get_http_status_message(HTTP_INTERNAL_SERVER_ERROR), HTTP_INTERNAL_SERVER_ERROR, 
+                get_current_date(), 
+                content.size(), 
+                "text/html", 
+                content
+            );
         }
 
         send(client_socket, response.c_str(), response.size(), 0);
