@@ -14,6 +14,8 @@
 #include <nlohmann/json.hpp> 
 #include <mutex>
 #include <queue>
+#include <chrono>
+#include <vector>
 #include <ixwebsocket/IXWebSocketServer.h>
 #include <ixwebsocket/IXNetSystem.h>
 
@@ -22,45 +24,6 @@
 #define PROTOCOL "HTTP/1.1"
 #define DOCUMENT_ROOT "www"
 #define LOG(x) std::cout << x << std::endl;
-
-// std::mutex websocket_queue_mutex;
-// std::queue<file_modification_t> websocket_event_queue;
-/*
-    Websocket stuff
-*/
-// void start_websocket_server(){
-//     ix::initNetSystem();
-
-//     ix::WebSocketServer server(WEBSOCKET_PORT_NUMBER);
-//     server.setOnConnectionCallback(
-//         [&server](std::weak_ptr<ix::WebSocket> websocket, std::shared_ptr<ix::ConnectionState> connection_state){
-//             std::cout << "New connection from " << connection_state->getRemoteIp() << std::endl;
-
-//             //Convert the weak pointer to shared_ptr so we can access the object
-//             std::shared_ptr<ix::WebSocket> websocket_ptr = (std::shared_ptr<ix::WebSocket>)websocket;
-//             ((std::shared_ptr<ix::WebSocket>)websocket)->setOnMessageCallback([websocket_ptr](const ix::WebSocketMessagePtr& msg){
-//                     if (msg->type == ix::WebSocketMessageType::Message){
-//                         std::cout << "Received: " << msg->str << std::endl;
-//                         websocket_ptr->send("Echo: " + msg->str);
-//                     } else if (msg->type == ix::WebSocketMessageType::Open){
-//                         std::cout << "Connection opened" << std::endl;
-//                     } else if (msg->type == ix::WebSocketMessageType::Close){
-//                         std::cout << "Connection closed" << std::endl;
-//                     }
-//                 });
-//         });
-
-//     auto res = server.listen();
-//     if (!res.first){
-//         std::cerr << "Error starting websocket server: " << res.second << std::endl;
-//     }
-
-//     server.start();
-
-//     std::cout << "Websocket server started on port " << WEBSOCKET_PORT_NUMBER << std::endl;
-
-//     server.wait();
-// }
 
 typedef enum HttpStatusCode {
     HTTP_OK = 200,
@@ -71,6 +34,130 @@ typedef enum HttpStatusCode {
 typedef struct http_request {
     std::string path;
 } http_request_t;
+
+
+typedef struct file_modification {
+    std::string filename;
+    std::string action;
+} file_modification_t;
+
+std::mutex websocket_mutex;
+std::queue<file_modification_t> websocket_event_queue;
+std::condition_variable websocket_cv;
+
+/*
+Websocket stuff
+*/
+void start_websocket_server(){
+    ix::initNetSystem();
+    std::vector<std::shared_ptr<ix::WebSocket>> connections;
+    std::mutex connections_mutex;
+    ix::WebSocketServer server(WEBSOCKET_PORT_NUMBER);
+
+    server.setOnConnectionCallback(
+        [&](std::weak_ptr<ix::WebSocket> websocket, std::shared_ptr<ix::ConnectionState> connection_state){
+            std::cout << "New connection from " << connection_state->getRemoteIp() << std::endl;
+
+            //Convert the weak pointer to shared_ptr so we can access the object
+            auto websocket_ptr = websocket.lock();
+            if(!websocket_ptr){
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(connections_mutex);
+                connections.push_back(websocket_ptr);
+            }
+
+            websocket_ptr->setOnMessageCallback([websocket_ptr](const ix::WebSocketMessagePtr& msg){
+                    if (msg->type == ix::WebSocketMessageType::Message){
+                        // std::cout << "Received: " << msg->str << std::endl;
+                        websocket_ptr->send("Echo: " + msg->str);
+                    } else if (msg->type == ix::WebSocketMessageType::Open){
+                        // std::cout << "Connection opened" << std::endl;
+                    } else if (msg->type == ix::WebSocketMessageType::Close){
+                        // std::cout << "Connection closed" << std::endl;
+                    }
+                });
+        });
+
+    auto res = server.listen();
+    if (!res.first){
+        std::cerr << "Error starting websocket server: " << res.second << std::endl;
+    }
+
+    server.start();
+
+    std::cout << "Websocket server started on port " << WEBSOCKET_PORT_NUMBER << std::endl;
+    
+    /*
+        separate thread for broadcasting messages
+        when a file modification happens
+    */
+    std::thread broadcaster([&]{
+        while(true){
+            file_modification_t file_mod;
+
+            {
+                std::unique_lock<std::mutex> lock(websocket_mutex);
+                if(websocket_event_queue.empty()){
+                    //sleep until new events
+                    websocket_cv.wait(lock, []{
+                        return !websocket_event_queue.empty();
+                    });
+                }
+                file_mod = websocket_event_queue.front();
+                websocket_event_queue.pop();
+            }
+            
+            //making sure that filename contains only ASCII characters
+            std::string checked_filename;
+            for(uint16_t i=0; i<file_mod.filename.length(); i++){
+                if(static_cast<unsigned char>(file_mod.filename[i]) < 128){
+                    checked_filename += file_mod.filename[i];
+                }
+            }
+            file_mod.filename = checked_filename;
+            
+            std::cout << "NEW FILE MODIFICATION IN QUEUE: " << file_mod.filename << " " << file_mod.action << std::endl;
+            
+            //create the json message
+            nlohmann::json json;
+            json["filename"] = file_mod.filename;
+            json["action"] = file_mod.action;
+            
+            //copy the connections safely
+            std::vector<std::shared_ptr<ix::WebSocket>> connections_copy;
+            {
+                std::lock_guard<std::mutex> lock(connections_mutex);
+                connections_copy = connections;
+            }
+
+            for(size_t i=0; i<connections_copy.size(); i++){
+                if(connections_copy[i]->getReadyState() == ix::ReadyState::Open){
+                    try {
+                        connections_copy[i]->send(json.dump());
+                    } catch(const std::exception& e){
+                        std::cerr << "send() failed: " << e.what() << std::endl;
+                    }
+                }
+            }
+
+            //remove all closed connections
+            {
+                std::lock_guard<std::mutex> lock(connections_mutex);
+                for(int i=connections.size()-1; i>-1; i--){
+                    if(connections[i]->getReadyState() != ix::ReadyState::Open){
+                        connections.erase(connections.begin()+i);
+                    }
+                }
+            }
+        }    
+    });
+
+    server.wait();
+    broadcaster.join();
+}
 
 std::string get_http_status_message(http_status_code_t code){
     switch(code){
@@ -96,35 +183,8 @@ std::string create_http_response(std::string status_message, http_status_code_t 
     return response;
 }
 
-/*
-    This function takes a html file as a string
-    and injects the js that is needed for auto refresh functionality
-*/
-void inject_js(std::string& html_content){
-    std::string js_string = "<script>console.log(\"hello from js injection\")</script>";
-
-    //goal is to find the body and inject script tag after that
-    for(int i=0; i<html_content.length(); i++){
-        if(html_content[i] == '<'){
-            std::string tag = "";
-            u_int insert_pos;
-            //check for body tag
-            for(int j=i+1; j<i+5; j++){
-                tag += html_content[j];
-                insert_pos = j+2;
-            }
-
-            if(tag == "body"){
-                html_content.insert(insert_pos, js_string);
-                std::cout << "Succesfully injected js to html file" << std::endl;
-                // std::cout << "Js injected version: " << html_content << std::endl;
-                return;
-            }
-        }
-    }
-
-    std::cout << "Failed to inject js in to the html file" << std::endl;
-}
+//define inject_js, no header files for now :D
+void inject_js(std::string& html_content);
 
 /*
     Read file from the document root folder
@@ -173,6 +233,36 @@ std::string read_file(const std::string& filename, const std::string& file_exten
     file.close();
     
     return content;
+}
+
+/*
+    This function takes a html file content as a string
+    and injects the js that is needed for auto refresh functionality
+*/
+void inject_js(std::string& html_content){
+    std::string js_string = "<script defer>"+read_file("js/injection.js", ".js")+"</script>";
+
+    //goal is to find the body and inject script tag after that
+    for(int i=0; i<html_content.length(); i++){
+        if(html_content[i] == '<'){
+            std::string tag = "";
+            u_int insert_pos;
+            //check for body tag
+            for(int j=i+1; j<i+5; j++){
+                tag += html_content[j];
+                insert_pos = j+2;
+            }
+
+            if(tag == "body"){
+                html_content.insert(insert_pos, js_string);
+                std::cout << "Succesfully injected js to html file" << std::endl;
+                // std::cout << "Js injected version: " << html_content << std::endl;
+                return;
+            }
+        }
+    }
+
+    std::cout << "Failed to inject js in to the html file" << std::endl;
 }
 
 /*
@@ -338,11 +428,6 @@ std::string get_content_type(const std::string& file_extension){
     return content_type;
 }
 
-typedef struct file_modification {
-    std::string filename;
-    std::string action;
-} file_modification_t;
-
 /*
     Handle the file modification object
     create the json message that will be sent through the websocket server
@@ -363,11 +448,11 @@ void handle_file_modification(file_modification_t& file_modification){
     json["filename"] = file_modification.filename;
     json["action"] = file_modification.action;
 
-    //NOTE: here call the websocket to broadcast a message
-}
-
-void search_for_html_tag(const std::string& tag_name){
-
+    {
+        //call websocket thread for file modification
+        std::lock_guard<std::mutex> lock(websocket_mutex);
+        websocket_event_queue.push(file_modification);
+    }
 }
 
 void check_for_file_changes(){
@@ -460,7 +545,13 @@ void check_for_file_changes(){
                     .filename = filename,
                     .action = action
                 };
-                //call thread 3 for file modification
+
+                {
+                    //call websocket thread for file modification
+                    std::lock_guard<std::mutex> lock(websocket_mutex);
+                    websocket_event_queue.push(file_modification);
+                }
+                websocket_cv.notify_one();
             }
             
             //more events to handle?
@@ -489,8 +580,11 @@ void check_for_file_changes(){
 int main(){
     //thread for handling the file changes
     // std::thread thread2(check_for_file_changes);
-    //this will be used for websocket server
-    // std::thread thread3(start_websocket_server);
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    
+    // thread for websocket server
+    std::thread thread3(start_websocket_server);    
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     WSADATA wsa_data;
     if(WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0){

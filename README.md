@@ -1,6 +1,6 @@
 # HTTP 1.1 Server 🦎
 
-- My first try on making a HTTP server with C++. At the moment using [Win32 API](https://learn.microsoft.com/en-us/windows/win32/api/) API and [nlohmannjson](https://github.com/nlohmann/json).
+- My first try on making a HTTP server with C++. At the moment using [Win32 API](https://learn.microsoft.com/en-us/windows/win32/api/) API, [nlohmannjson](https://github.com/nlohmann/json) and [IXWebSocket](https://github.com/machinezone/IXWebSocket).
 - All the functionality is right now in main.cpp since i wanted to start coding this more freely, all refactoring+organizing will be done later...
 
 ## Now working
