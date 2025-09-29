@@ -19,6 +19,7 @@
 ## Updates:
 - UI (probably with imgui or Win32 API)
 - Fixing possible bugs
+- Better error checking
 - Project structure organization
 - Refactoring
 
