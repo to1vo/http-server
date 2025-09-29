@@ -13,11 +13,12 @@
 - 200, 404 and 500 status
 - Checking for file/folder modifications inside the www folder
 - Prevented path traversal etc.
-
-## Updates:
 - Auto refresh JS injection
 - Websocket server for auto refresh
+
+## Updates:
 - UI (probably with imgui or Win32 API)
+- Fixing possible bugs
 - Project structure organization
 - Refactoring
 
