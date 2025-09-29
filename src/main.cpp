@@ -72,7 +72,7 @@ void start_websocket_server(){
             websocket_ptr->setOnMessageCallback([websocket_ptr](const ix::WebSocketMessagePtr& msg){
                     if (msg->type == ix::WebSocketMessageType::Message){
                         // std::cout << "Received: " << msg->str << std::endl;
-                        websocket_ptr->send("Echo: " + msg->str);
+                        websocket_ptr->send("{\"msg\":\""+msg->str+"\"}");
                     } else if (msg->type == ix::WebSocketMessageType::Open){
                         // std::cout << "Connection opened" << std::endl;
                     } else if (msg->type == ix::WebSocketMessageType::Close){
@@ -111,6 +111,7 @@ void start_websocket_server(){
             }
             
             //making sure that filename contains only ASCII characters
+            //rly needed?
             std::string checked_filename;
             for(uint16_t i=0; i<file_mod.filename.length(); i++){
                 if(static_cast<unsigned char>(file_mod.filename[i]) < 128){
@@ -120,6 +121,13 @@ void start_websocket_server(){
             file_mod.filename = checked_filename;
             
             std::cout << "NEW FILE MODIFICATION IN QUEUE: " << file_mod.filename << " " << file_mod.action << std::endl;
+            
+            //replace backslashes
+            for(int i=0; i<file_mod.filename.length(); i++){
+                if(file_mod.filename[i] == '\\'){
+                    file_mod.filename[i] = '/';
+                }
+            }
             
             //create the json message
             nlohmann::json json;
@@ -475,7 +483,7 @@ void check_for_file_changes(){
     );
     
     assert(file != INVALID_HANDLE_VALUE);
-    OVERLAPPED overlapped;
+    OVERLAPPED overlapped = {};
     overlapped.hEvent = CreateEvent(NULL, FALSE, 0, NULL);
     
     //Create a buffer to save the changes
@@ -492,25 +500,32 @@ void check_for_file_changes(){
         NULL, &overlapped, NULL
     );
 
+    if(success == FALSE){
+        std::cout << "Problem with ReadDirectoryChanges" << std::endl;
+    }
+
     while(true){
-        DWORD result = WaitForSingleObject(overlapped.hEvent, 0);
+        DWORD result = WaitForSingleObject(overlapped.hEvent, INFINITE);
         
         if(result == WAIT_OBJECT_0){
             std::cout << "FILE CHANGE HAPPENED" << std::endl;
             DWORD bytes_transferred;
             GetOverlappedResult(file, &overlapped, &bytes_transferred, FALSE);
+            FILE_NOTIFY_INFORMATION *event;
 
-            //store the event
-            FILE_NOTIFY_INFORMATION *event = (FILE_NOTIFY_INFORMATION*)change_buffer;
-
-            while(true){
+            do{
+                //store the event
+                event = (FILE_NOTIFY_INFORMATION*)change_buffer;
+               
                 DWORD name_len = event->FileNameLength / sizeof(wchar_t);
             
-                //read to whole filename
-                std::string filename;
-                for(int i=0; i<(int)wcslen(event->FileName); i++){
-                    filename += event->FileName[i];
-                }
+                //read the filename
+                //right now just works with ASCII
+                std::wstring ws(event->FileName, name_len);
+                std::string filename(ws.begin(), ws.end());
+                // for(int i=0; i<(int)wcslen(event->FileName); i++){
+                //     filename += event->FileName[i];
+                // }
             
                 std::cout << "Filename: " << filename << std::endl;
             
@@ -539,6 +554,7 @@ void check_for_file_changes(){
             }
             
             //there was no undefined action
+            //DO I REALLY WANNA MAKE THIS STRUCT HERE....
             if(!action.empty()){
                 //create filechange object
                 file_modification_t file_modification {
@@ -556,12 +572,13 @@ void check_for_file_changes(){
             
             //more events to handle?
             if(event->NextEntryOffset){
-                *((uint8_t**)&event) += event->NextEntryOffset;
+                event = (FILE_NOTIFY_INFORMATION*)((BYTE*)event + event->NextEntryOffset);
             } else {
                 break;
             }
-            }
+            } while(event->NextEntryOffset != 0);
         }
+        
         
         //queue the next event
         BOOL success = ReadDirectoryChangesW(
@@ -575,12 +592,16 @@ void check_for_file_changes(){
             NULL, &overlapped, NULL
         );      
     }
+
+    //cleanup
+    CloseHandle(overlapped.hEvent);
+    CloseHandle(file);
 }
 
 int main(){
     //thread for handling the file changes
-    // std::thread thread2(check_for_file_changes);
-    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::thread thread2(check_for_file_changes);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     
     // thread for websocket server
     std::thread thread3(start_websocket_server);    

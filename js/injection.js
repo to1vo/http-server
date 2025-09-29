@@ -7,11 +7,14 @@ websocket.addEventListener("open", () => {
 });
 
 websocket.addEventListener("message", (msg) => {
-    const json = msg.data;
+    const json = JSON.parse(msg.data);
+    if(!json.filename) return;
+
     const date = new Date();
     if(json.filename.includes(".css")){
-        const element = document.querySelector(`link[href="${json.filename}"]`);
+        const element = document.querySelector(`link[href^="${json.filename}"]`);
         element.setAttribute("href", json.filename+"?q="+date.getMilliseconds());
         return;
     }
+    window.location.reload();
 });
