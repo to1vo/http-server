@@ -1,4 +1,10 @@
 .vscode/
 build/
+www/hello.html
+Www/test.html
+www/img/
+www/js/
+www/other/
+www/style/
 secret.json
 todo.txt

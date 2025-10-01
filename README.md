@@ -17,7 +17,7 @@
 - Websocket server for auto refresh
 
 ## How to use
-Move your webpage content to the www folder (remove the default content)
+Move your webpage content to the www folder
 ```cmd
 > Run these commands
 make
