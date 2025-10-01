@@ -16,6 +16,16 @@
 - Auto refresh JS injection
 - Websocket server for auto refresh
 
+## How to use
+Move your webpage content to the www folder (remove the default content)
+```cmd
+> Run these commands
+make
+cd bin
+server.exe
+```
+Then go to localhost:8081
+
 ## Updates:
 - UI (probably with imgui or Win32 API)
 - Fixing possible bugs
