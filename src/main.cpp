@@ -22,7 +22,7 @@
 #define PORT_NUMBER 8081
 #define WEBSOCKET_PORT_NUMBER 9001
 #define PROTOCOL "HTTP/1.1"
-#define DOCUMENT_ROOT "www"
+#define DOCUMENT_ROOT "../www"
 #define LOG(x) std::cout << x << std::endl;
 
 typedef enum HttpStatusCode {
