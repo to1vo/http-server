@@ -16,6 +16,7 @@
 #include <queue>
 #include <chrono>
 #include <vector>
+#include <memory>
 #include <ixwebsocket/IXWebSocketServer.h>
 #include <ixwebsocket/IXNetSystem.h>
 
@@ -28,11 +29,22 @@
 typedef enum HttpStatusCode {
     HTTP_OK = 200,
     HTTP_NOT_FOUND = 404,
+    HTTP_METHOD_NOT_ALLOWED = 405,
     HTTP_INTERNAL_SERVER_ERROR = 500
 } http_status_code_t;
 
+typedef enum HttpMethod {
+    HTTP_GET,
+    HTTP_POST,
+    HTTP_PUT,
+    HTTP_PATCH,
+    HTTP_DELETE,
+    HTTP_UNKNOWN_METHOD
+} http_method_t;
+
 typedef struct http_request {
     std::string path;
+    http_method_t method;
 } http_request_t;
 
 
@@ -169,10 +181,16 @@ void start_websocket_server(){
 
 std::string get_http_status_message(http_status_code_t code){
     switch(code){
-        HTTP_OK: return "OK";
-        HTTP_NOT_FOUND: return "Not Found";        
-        HTTP_INTERNAL_SERVER_ERROR: return "Internal Server Error";        
-        default: return "Unknown Status Code";
+        case HTTP_OK:
+            return "OK";
+        case HTTP_NOT_FOUND:
+            return "Not Found";
+        case HTTP_INTERNAL_SERVER_ERROR:
+            return "Internal Server Error";
+        case HTTP_METHOD_NOT_ALLOWED:
+            return "Method Not Allowed";
+        default:
+            return "Unknown Status Code";
     }
 }
 
@@ -336,11 +354,46 @@ bool file_exists(const std::string& filepath){
     return false;
 }
 
+http_method_t get_http_method_from_str(const std::string& method){
+    if(method == "GET"){
+        return HTTP_GET;
+    }
+    if(method == "POST"){
+        return HTTP_POST;
+    }
+    if(method == "PUT"){
+        return HTTP_PUT;
+    }
+    if(method == "PATCH"){
+        return HTTP_PATCH;
+    }
+    if(method == "DELETE"){
+        return HTTP_DELETE;
+    }
+    return HTTP_UNKNOWN_METHOD;
+}
+
+/*
+    Parses the path and method of the given http request
+*/
 http_request_t parse_html_request(char* request_buffer){
     std::string request_str = request_buffer;
     std::string path_temp;
+    std::string method_temp;
     http_request_t request;
     
+    //parse the method
+    for(int i=0; i<request_str.length(); i++){
+        if(request_str[i] != ' ' && request_str[i] != '/'){
+            method_temp += request_str[i];
+            continue;
+        }       
+        // std::cout << method_temp << std::endl;
+        request.method = get_http_method_from_str(method_temp);
+        break;
+    }
+
+    //parse the path
     for(int i=0; i<request_str.length(); i++){
         if(request_str[i] == '/'){
             //start of path
@@ -354,12 +407,11 @@ http_request_t parse_html_request(char* request_buffer){
                 }
                 path_temp += request_str[j];
             }
+            request.path = path_temp;
             break;
         }
     }
-    
-    request.path = path_temp;
-    
+
     return request;
 }
 
@@ -641,13 +693,30 @@ int main(){
         recv(client_socket, buffer, sizeof(buffer), 0);
         // std::cout << "Message from client: " << buffer << std::endl;
         
-        //create request object
+        //create request and the response objects
         http_request_t request = parse_html_request(buffer);
+        std::string response;
+
         std::cout << "REQUEST TO PATH: " << request.path << std::endl;
+
+        //only GET allowed
+        if(request.method != HTTP_GET){
+            std::string content = "method not supported";
+            response = create_http_response(
+                    get_http_status_message(HTTP_METHOD_NOT_ALLOWED),
+                    HTTP_METHOD_NOT_ALLOWED, 
+                    get_current_date(), 
+                    content.size(), 
+                    "text/plain", 
+                    content
+                );
+            send(client_socket, response.c_str(), response.size(), 0);
+            closesocket(client_socket);
+            continue;
+        }
         
         //this will include the document root
         std::string filename = get_filename_from_path(request.path);
-        std::string response;
         
         try {
             //check if the file actually exists in the document root folder
